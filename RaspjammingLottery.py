@@ -43,15 +43,13 @@ try:
 except ImportError:
     import simplejson as json
 
-import sys
+import sys, uuid
 from twitter import Twitter, OAuth, TwitterHTTPError, TwitterStream
 from twitter.util import Fail, err
 from random import randint
 from os.path import expanduser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Timer, Lock
-
-HOME_DIR = expanduser("~")
 
 # Variables that contains the user credentials to access Twitter API 
 AUTH_DATA = { 
@@ -61,7 +59,7 @@ AUTH_DATA = {
     'CONSUMER_SECRET' : ''
 }
 
-TWITTER_AUTH_FILE = HOME_DIR + '/.raspjamming.lottery.twitter.auth'
+TWITTER_AUTH_FILE = expanduser("~") + '/.raspjamming.lottery.twitter.auth'
 with open(TWITTER_AUTH_FILE) as authFile:
     for line in authFile:
         line = line.strip().split('=')
@@ -125,13 +123,26 @@ class Lottery(Observable):
             print("No players left -> No winner selected")
             return (NO_PLAYER_WON, "... No players left :(")
 
+    def send_direct_message(self, winnerName, currentValidAuthId):
+        """
+        Sends a new Direct Message to the specified user from the authenticating user.
+        Requires both the user and text parameters and must be a POST. Returns the sent
+        message if successful.
+
+        Ok, this endpoint will be deprecated and non-functional on June 19, 2018 ... but I don't care :D
+        """
+        twitter.direct_messages.new(user="woergi", text=currentValidAuthId) # TODO replace woergi by winnerName
+        print("Current valid winning auth-id " + currentValidAuthId + " for user " + winnerName)
+
     def run(self):
         # this is the tick event of the timer, choose a new winner and store it somehow in a global var for the request handler
         (winnerId, winnerName) = self._select_winner()
-        self._fire(winnerId = winnerId, winnerName = winnerName)
+        currentValidAuthId = str(uuid.uuid4())
+        self._fire(winnerId = winnerId, winnerName = winnerName, currentValidAuthId=currentValidAuthId)
         # TODO send private message to winner
         # TODO Generate a secret and send it as private message to the winner
         if winnerId != NO_PLAYER_WON:
+            self.send_direct_message(winnerName, currentValidAuthId)
             Timer(self.RedeemTimeInSec, self.run, ()).start()
 
 
@@ -139,11 +150,13 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     winnerLock = Lock()
     winnerId = 0
     winnerName = ''
+    currentValidAuthId = ''
 
     def set_winner(event):
         with HTTPRequestHandler.winnerLock:
             HTTPRequestHandler.winnerId = getattr(event, 'winnerId', 0)
             HTTPRequestHandler.winnerName = getattr(event, 'winnerName', '')
+            HTTPRequestHandler.currentValidAuthId = getattr(event, 'currentValidAuthId', '')
             print("Received new winner in HTTPRequestHandler: " + HTTPRequestHandler.winnerName + " (" + str(HTTPRequestHandler.winnerId) + ")")
 
     def _set_headers(self):
@@ -154,6 +167,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         with HTTPRequestHandler.winnerLock:
             winner = (str(HTTPRequestHandler.winnerId), HTTPRequestHandler.winnerName)
+            currentValidAuthId = HTTPRequestHandler.currentValidAuthId
         print("Request received: " + self.path)
         # todo 
         self._set_headers()
@@ -196,12 +210,12 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
         <tr> <td colspan='2'>The winner is:</td></tr> 
         <tr> <td>Name: </td> <td>""" + winner[1] + """</td> </tr>
         <tr> <td>ID: </td> <td>""" + winner[0] + """</td> </tr>
+        <!-- """ + currentValidAuthId + """ -->
     </table> 
     </div> </div> </div>
 </body></html>
         """).encode())
         # TODO Show time until next winner will be selected
-        # Trigger next winner after timeout <- not on request!
 
     def do_HEAD(self):
         self._set_headers()
@@ -328,6 +342,7 @@ def follow(twitter, screen_name, followers=True):
 def shutdown_http_server(event):
     if getattr(event, 'winnerId', 0) == NO_PLAYER_WON:
         srv.shutdown()
+
 
 # Retrieve followers list
 oauth = OAuth(AUTH_DATA['ACCESS_TOKEN'],
