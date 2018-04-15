@@ -50,6 +50,8 @@ from random import randint
 from os.path import expanduser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Timer, Lock
+from datetime import datetime, timedelta
+import time
 
 # Variables that contains the user credentials to access Twitter API 
 AUTH_DATA = { 
@@ -138,11 +140,14 @@ class Lottery(Observable):
         # this is the tick event of the timer, choose a new winner and store it somehow in a global var for the request handler
         (winnerId, winnerName) = self._select_winner()
         currentValidAuthId = str(uuid.uuid4())
-        self._fire(winnerId = winnerId, winnerName = winnerName, currentValidAuthId=currentValidAuthId)
-        # TODO send private message to winner
-        # TODO Generate a secret and send it as private message to the winner
+        t = time.localtime()
+        redeemEndTime = datetime(t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec) \
+                + timedelta(0, self.RedeemTimeInSec)
+        self._fire(winnerId = winnerId, winnerName = winnerName, \
+                currentValidAuthId = currentValidAuthId, \
+                redeemEndTime = redeemEndTime)
         if winnerId != NO_PLAYER_WON:
-            self.send_direct_message(winnerName, currentValidAuthId)
+            #self.send_direct_message(winnerName, currentValidAuthId)
             Timer(self.RedeemTimeInSec, self.run, ()).start()
 
 
@@ -157,6 +162,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
             HTTPRequestHandler.winnerId = getattr(event, 'winnerId', 0)
             HTTPRequestHandler.winnerName = getattr(event, 'winnerName', '')
             HTTPRequestHandler.currentValidAuthId = getattr(event, 'currentValidAuthId', '')
+            HTTPRequestHandler.redeemEndTime = getattr(event, 'redeemEndTime', datetime(1,1,1))
             print("Received new winner in HTTPRequestHandler: " + HTTPRequestHandler.winnerName + " (" + str(HTTPRequestHandler.winnerId) + ")")
 
     def _set_headers(self):
@@ -168,13 +174,14 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
         with HTTPRequestHandler.winnerLock:
             winner = (str(HTTPRequestHandler.winnerId), HTTPRequestHandler.winnerName)
             currentValidAuthId = HTTPRequestHandler.currentValidAuthId
+            redeemEndTime = HTTPRequestHandler.redeemEndTime
         print("Request received: " + self.path)
-        # todo 
         self._set_headers()
         self.wfile.write(("""
 <html>
 <header>
     <title>Raspjamming Lottery</title>
+    <meta http-equiv="refresh" content="10" />
     <style type='text/css'>
     html, body { 
       height: 100%; 
@@ -210,12 +217,12 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
         <tr> <td colspan='2'>The winner is:</td></tr> 
         <tr> <td>Name: </td> <td>""" + winner[1] + """</td> </tr>
         <tr> <td>ID: </td> <td>""" + winner[0] + """</td> </tr>
+        <tr> <td colspan='2'>Redemption ends at: """ + redeemEndTime.strftime('%H:%M:%S') + """</td></tr>
         <!-- """ + currentValidAuthId + """ -->
     </table> 
     </div> </div> </div>
 </body></html>
         """).encode())
-        # TODO Show time until next winner will be selected
 
     def do_HEAD(self):
         self._set_headers()
