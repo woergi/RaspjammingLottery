@@ -133,7 +133,7 @@ class Lottery(Observable):
 
         Ok, this endpoint will be deprecated and non-functional on June 19, 2018 ... but I don't care :D
         """
-        twitter.direct_messages.new(user="woergi", text=currentValidAuthId) # TODO replace woergi by winnerName
+        twitter.direct_messages.new(user=winnerName, text=currentValidAuthId)
         print("Current valid winning auth-id " + currentValidAuthId + " for user " + winnerName)
 
     def run(self):
@@ -147,6 +147,7 @@ class Lottery(Observable):
                 currentValidAuthId = currentValidAuthId, \
                 redeemEndTime = redeemEndTime)
         if winnerId != NO_PLAYER_WON:
+            # TODO uncomment direct message sending
             #self.send_direct_message(winnerName, currentValidAuthId)
             Timer(self.RedeemTimeInSec, self.run, ()).start()
 
