@@ -52,23 +52,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Timer, Lock
 from datetime import datetime, timedelta
 import time
-
-# Variables that contains the user credentials to access Twitter API 
-AUTH_DATA = { 
-    'ACCESS_TOKEN' : '',
-    'ACCESS_SECRET' : '',
-    'CONSUMER_KEY' : '',
-    'CONSUMER_SECRET' : ''
-}
-
-TWITTER_AUTH_FILE = expanduser("~") + '/.raspjamming.lottery.twitter.auth'
-with open(TWITTER_AUTH_FILE) as authFile:
-    for line in authFile:
-        line = line.strip().split('=')
-        key = line[0].strip()
-        if len(key) == 0:
-            continue
-        AUTH_DATA[key] = line[1].strip()
+from argparse import ArgumentParser
 
 BLACKLISTED_USER_IDS = [
     #Non-human users:
@@ -101,12 +85,13 @@ class Observable(object):
 
 
 class Lottery(Observable):
-    def __init__(self, playerIds, playerNames):
+    def __init__(self, playerIds, playerNames, simulate):
         super().__init__()
         self.RedeemTimeInSec = 600 # every ~10 min a new winner
         self.playerIds = playerIds
         self.playerNames = playerNames
         self.forfeitPlayers = []
+        self.simulate = simulate
 
     def _select_winner(self):
         """ Select a winner of all given players. Exclude already played and black listed players """
@@ -133,7 +118,10 @@ class Lottery(Observable):
 
         Ok, this endpoint will be deprecated and non-functional on June 19, 2018 ... but I don't care :D
         """
-        twitter.direct_messages.new(user=winnerName, text=currentValidAuthId)
+        if not self.simulate:
+            twitter.direct_messages.new(user=winnerName, text=currentValidAuthId)
+        else:
+            print("JUST SIMULATING...")
         print("Current valid winning auth-id " + currentValidAuthId + " for user " + winnerName)
 
     def run(self):
@@ -147,8 +135,7 @@ class Lottery(Observable):
                 currentValidAuthId = currentValidAuthId, \
                 redeemEndTime = redeemEndTime)
         if winnerId != NO_PLAYER_WON:
-            # TODO uncomment direct message sending
-            #self.send_direct_message(winnerName, currentValidAuthId)
+            self.send_direct_message(winnerName, currentValidAuthId)
             Timer(self.RedeemTimeInSec, self.run, ()).start()
 
 
@@ -352,36 +339,65 @@ def shutdown_http_server(event):
         srv.shutdown()
 
 
-# Retrieve followers list
-oauth = OAuth(AUTH_DATA['ACCESS_TOKEN'],
-            AUTH_DATA['ACCESS_SECRET'], 
-            AUTH_DATA['CONSUMER_KEY'],
-            AUTH_DATA['CONSUMER_SECRET'])
-twitter = Twitter(auth=oauth)
-user_ids, users = [], {}
-try:
-    user = sys.argv[1]
-    print("Twitter user for lottery: " + user)
-    user_ids = follow(twitter, user, True)
-    users = lookup(twitter, user_ids)
-except KeyboardInterrupt as e:
-    err()
-    err("Interrupted.")
-    raise SystemExit(1)
+def main():
+    parser = ArgumentParser()
+    parser.add_argument("twitter_user")
+    parser.add_argument("-r", "--run", help="do real lottery run")
+    args = parser.parse_args()
 
-print("Found users:")
-for uid in user_ids:
+    simulateRun = True
+    if args.run:
+        simulateRun = False
+
+    # Variables that contains the user credentials to access Twitter API 
+    AUTH_DATA = { 
+        'ACCESS_TOKEN' : '',
+        'ACCESS_SECRET' : '',
+        'CONSUMER_KEY' : '',
+        'CONSUMER_SECRET' : ''
+    }
+    TWITTER_AUTH_FILE = expanduser("~") + '/.raspjamming.lottery.twitter.auth'
+    with open(TWITTER_AUTH_FILE) as authFile:
+        for line in authFile:
+            line = line.strip().split('=')
+            key = line[0].strip()
+            if len(key) == 0:
+                continue
+            AUTH_DATA[key] = line[1].strip()
+
+    oauth = OAuth(AUTH_DATA['ACCESS_TOKEN'],
+                AUTH_DATA['ACCESS_SECRET'], 
+                AUTH_DATA['CONSUMER_KEY'],
+                AUTH_DATA['CONSUMER_SECRET'])
+    twitter = Twitter(auth=oauth)
+    user_ids, users = [], {}
     try:
-        print(str(uid) + "\t" + users[uid])
-    except KeyError:
-        pass
+        # Retrieve followers list
+        user = args.twitter_user
+        print("Twitter user for lottery: " + user)
+        user_ids = follow(twitter, user, True)
+        users = lookup(twitter, user_ids)
+    except KeyboardInterrupt as e:
+        err()
+        err("Interrupted.")
+        raise SystemExit(1)
 
-l = Lottery(user_ids, users)
-srv = HTTPServer(('127.0.0.1', 5000), HTTPRequestHandler)
-l.subscribe(shutdown_http_server)
-l.subscribe(HTTPRequestHandler.set_winner)
-l.run()
-srv.serve_forever()
+    print("Found users:")
+    for uid in user_ids:
+        try:
+            print(str(uid) + "\t" + users[uid])
+        except KeyError:
+            pass
+
+    l = Lottery(user_ids, users, simulateRun)
+    srv = HTTPServer(('127.0.0.1', 5000), HTTPRequestHandler)
+    l.subscribe(shutdown_http_server)
+    l.subscribe(HTTPRequestHandler.set_winner)
+    l.run()
+    srv.serve_forever()
+
 
 # Usage: ./RaspjammingLottery.py Raspjamming
+if __name__ == "__main__":
+    main()
 
